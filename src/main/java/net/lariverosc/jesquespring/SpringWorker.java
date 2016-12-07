@@ -16,12 +16,12 @@
 package net.lariverosc.jesquespring;
 
 import java.util.Collection;
-import java.util.Collections;
 import java.util.concurrent.atomic.AtomicBoolean;
 import net.greghaines.jesque.Config;
 import net.greghaines.jesque.Job;
 import static net.greghaines.jesque.worker.WorkerEvent.JOB_PROCESS;
 import static net.greghaines.jesque.utils.ResqueConstants.WORKER;
+import net.greghaines.jesque.worker.ReflectiveJobFactory;
 import net.greghaines.jesque.worker.WorkerImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,7 +35,7 @@ import org.springframework.context.ApplicationContextAware;
  */
 public class SpringWorker extends WorkerImpl implements ApplicationContextAware {
 
-    private Logger logger = LoggerFactory.getLogger(SpringWorker.class);
+    private final Logger logger = LoggerFactory.getLogger(SpringWorker.class);
 
     private ApplicationContext applicationContext;
 
@@ -54,7 +54,7 @@ public class SpringWorker extends WorkerImpl implements ApplicationContextAware 
      * @param queues the list of queues to poll
      */
     public SpringWorker(final Config config, final Collection<String> queues) {
-        super(config, queues, Collections.EMPTY_MAP);
+        super(config, queues, new ReflectiveJobFactory() );
         this.name = createName();
     }
 
