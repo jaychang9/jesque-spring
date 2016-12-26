@@ -15,19 +15,28 @@
  */
 package net.lariverosc.jesquespring;
 
-import java.util.Collection;
-import java.util.concurrent.atomic.AtomicBoolean;
-import net.greghaines.jesque.Config;
-import net.greghaines.jesque.Job;
-import static net.greghaines.jesque.worker.WorkerEvent.JOB_PROCESS;
 import static net.greghaines.jesque.utils.ResqueConstants.WORKER;
-import net.greghaines.jesque.worker.ReflectiveJobFactory;
-import net.greghaines.jesque.worker.WorkerImpl;
+import static net.greghaines.jesque.worker.WorkerEvent.JOB_PROCESS;
+
+import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import javax.annotation.Resource;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
+
+import net.greghaines.jesque.Config;
+import net.greghaines.jesque.Job;
+import net.greghaines.jesque.worker.ReflectiveJobFactory;
+import net.greghaines.jesque.worker.WorkerImpl;
 
 /**
  *
@@ -67,13 +76,14 @@ public class SpringWorker extends WorkerImpl implements ApplicationContextAware 
                 runnableJob = (Runnable) applicationContext.getBean(job.getClassName(), job.getArgs());
             } else {
                 try {
-                    Class clazz = Class.forName(job.getClassName());//Lookup by Class type
+                    Class<?> clazz = Class.forName(job.getClassName());//Lookup by Class type
                     String[] beanNames = applicationContext.getBeanNamesForType(clazz, true, false);
                     if (applicationContext.containsBeanDefinition(job.getClassName())) {
                         runnableJob = (Runnable) applicationContext.getBean(beanNames[0], job.getArgs());
                     } else {
                         if (beanNames != null && beanNames.length == 1) {
                             runnableJob = (Runnable) applicationContext.getBean(beanNames[0], job.getArgs());
+                            doProcessInitRunableJob(job, runnableJob, clazz);	
                         }
                     }
                 } catch (ClassNotFoundException cnfe) {
@@ -99,6 +109,56 @@ public class SpringWorker extends WorkerImpl implements ApplicationContextAware 
             this.processingJob.set(false);
         }
     }
+    
+    /**
+     * Initialize the RunnableJob by runnableJobClazz and job 's paramater args
+     */
+	private void doProcessInitRunableJob(final Job job, Runnable runnableJob, Class<?> runnableJobClazz)
+			throws IllegalAccessException {
+		Field[] allFields = runnableJobClazz.getDeclaredFields();
+		if(allFields.length > 0){
+			List<Field> needFields = doFindNeedField(allFields);
+			//Check the Job Class's Field num is or not match the Job instance's arg num
+			if(needFields.size() != job.getArgs().length){
+				throw new RuntimeException("The "+runnableJobClazz.getName()+" Class's Fields(not include marked as @Resource and @Autowired Fields) quantity not match the Job instance args quantity,please check the Class ["+runnableJobClazz.getName()+"]");
+			}
+			for(int i = 0 ; i < needFields.size() ; i++){
+				Field field = needFields.get(i);
+				Class<?> fieldType = field.getType();
+				field.setAccessible(true);
+				Object arg = job.getArgs()[i];
+				if( fieldType != job.getArgs()[i].getClass()){
+					//Fix when the Job args parameter has java.lang.Long or java.lang.Float type,jackson framework will the change the java.lang.Long to java.lang.Integer,
+					// and the java.lang.Float to java.lang.Double
+					if(fieldType == Long.class){
+						field.set(runnableJob, Long.valueOf(arg.toString()));
+					}else if(fieldType == Float.class){
+						field.set(runnableJob, Float.valueOf(arg.toString()));
+					}else{
+						field.set(runnableJob, arg);
+					}
+				}
+				else{
+					field.set(runnableJob, arg);
+				}
+			}
+		}
+	}
+    
+	/**
+     * Find the needed Field that are not marked by @Resource or @Autowired annotation
+     */
+    private List<Field> doFindNeedField(Field[]  fields) {
+		List<Field> needFields = new ArrayList<Field>();
+		for(int i = 0 ; i < fields.length ; i ++){
+			Field field = fields[i];
+			if(field.getDeclaredAnnotation(Autowired.class) != null || field.getDeclaredAnnotation(Resource.class) != null){
+				continue;
+			}
+			needFields.add(field);
+		}
+		return needFields;
+	}
 
     @Override
     public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
